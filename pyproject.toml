@@ -1,0 +1,12 @@
+[project]
+name = "comfyui-projectmanager"
+version = "0.1.0"
+description = "Project management nodes for ComfyUI — set a project folder and save outputs there automatically"
+license = "MIT"
+requires-python = ">=3.10"
+
+[project.urls]
+Repository = "https://github.com/apyekitosh/comfyui-projectmanager"
+
+[tool.comfy]
+PublisherId = "apyekitosh"
