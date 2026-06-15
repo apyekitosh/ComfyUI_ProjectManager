@@ -11,6 +11,7 @@ const pm = {
     state: {
         current_project: null,
         current_asset: "",
+        current_local_asset: "",
         recent_projects: [],
         enabled: false,
     },
@@ -18,7 +19,6 @@ const pm = {
     dropdown: null,
     dropdownOpen: false,
     setProjectBtn: null,
-    toggleBtn: null,
 };
 
 // ---------------------
@@ -135,6 +135,21 @@ function esc(str) {
         .replace(/</g, "&lt;");
 }
 
+function isProjectActive() {
+    return !!(pm.state.current_project && pm.state.enabled);
+}
+
+function getSaveInfo() {
+    if (isProjectActive()) {
+        const asset = (pm.state.current_asset ?? "").trim().replace(/\\/g, "/").replace(/^\/|\/$/g, "");
+        const base = (pm.state.current_project ?? "").replace(/\\/g, "/") + "/AIPipeline";
+        return "Saving to: " + (asset ? base + "/" + asset : base);
+    }
+    const local = (pm.state.current_local_asset ?? "").trim().replace(/\\/g, "/").replace(/^\/|\/$/g, "");
+    const base = (pm.outputDir || "ComfyUI output").replace(/\\/g, "/");
+    return "Saving to: " + (local ? base + "/" + local : base);
+}
+
 // ---------------------
 // Styles (injected once)
 // ---------------------
@@ -206,6 +221,22 @@ function injectStyles() {
         }
         .pm-input:focus { border-color: #555; }
         .pm-divider { border: none; border-top: 1px solid #2e2e2e; margin: 12px 0; }
+        .pm-save-info {
+            font-size: 11px;
+            font-style: italic;
+            color: #555;
+            line-height: 1.4;
+            word-break: break-all;
+        }
+        #pm-toggle-circle {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            transition: background 0.2s;
+        }
+        #pm-toggle-circle.pm-circle-clickable { cursor: pointer; }
+        #pm-toggle-circle.pm-circle-clickable:hover { opacity: 0.8; }
     `;
     document.head.appendChild(s);
 }
@@ -268,81 +299,132 @@ function closeDropdown() {
 
 function renderDropdown() {
     const { state } = pm;
-    const noProject = !state.current_project;
+    const projectOn = isProjectActive();
     const name = projectName(state.current_project);
 
+    // Determine toggle circle color
+    let circleColor, circleClickable, circleTitle;
+    if (!state.current_project) {
+        circleColor = "#555";
+        circleClickable = false;
+        circleTitle = "No active project";
+    } else if (state.enabled) {
+        circleColor = "#4caf50";
+        circleClickable = true;
+        circleTitle = "Project ON — click to pause";
+    } else {
+        circleColor = "#e05555";
+        circleClickable = true;
+        circleTitle = "Project paused — click to enable";
+    }
+
+    const activeFolder = projectOn
+        ? (state.current_asset ?? "")
+        : (state.current_local_asset ?? "");
+
     pm.dropdown.innerHTML = `
-        <div style="font-size:14px;font-weight:600;margin-bottom:12px;padding-bottom:10px;
-                    border-bottom:1px solid #2e2e2e;overflow:hidden;text-overflow:ellipsis;
-                    white-space:nowrap;display:flex;align-items:center;gap:8px;"
+        <!-- Header -->
+        <div style="display:flex;align-items:center;justify-content:space-between;
+                    font-size:14px;font-weight:600;margin-bottom:12px;padding-bottom:10px;
+                    border-bottom:1px solid #2e2e2e;"
              title="${esc(state.current_project ?? "")}">
-            <i class="pi pi-folder" style="color:#f0a500;flex-shrink:0;"></i>
-            <span>${esc(name)}</span>
+            <div style="display:flex;align-items:center;gap:8px;overflow:hidden;">
+                <i class="pi pi-folder" style="color:#f0a500;flex-shrink:0;"></i>
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(name)}</span>
+            </div>
+            <div id="pm-toggle-circle"
+                 class="${circleClickable ? "pm-circle-clickable" : ""}"
+                 title="${esc(circleTitle)}"
+                 style="background:${circleColor};">
+            </div>
         </div>
 
-        <div class="pm-label">Recent Projects</div>
-        <div id="pm-recent" style="margin-bottom:10px;">
-            ${
-                state.recent_projects.length
-                    ? state.recent_projects
-                        .map(
-                            (p) => `
-                            <div class="pm-item pm-recent-item" data-path="${esc(p)}" title="${esc(p)}">
-                                <i class="pi pi-history" style="font-size:11px;color:#777;flex-shrink:0;"></i>
-                                <span>${esc(projectName(p))}</span>
-                            </div>`
-                        )
-                        .join("")
-                    : `<div style="color:#555;padding:4px 8px;font-size:12px;">No recent projects</div>`
-            }
-        </div>
+        ${projectOn ? `
+            <!-- Project ON: recents + select folder -->
+            <div class="pm-label">Recent Projects</div>
+            <div id="pm-recent" style="margin-bottom:10px;">
+                ${
+                    state.recent_projects.length
+                        ? state.recent_projects
+                            .map((p) => `
+                                <div class="pm-item pm-recent-item" data-path="${esc(p)}" title="${esc(p)}">
+                                    <i class="pi pi-history" style="font-size:11px;color:#777;flex-shrink:0;"></i>
+                                    <span>${esc(projectName(p))}</span>
+                                </div>`)
+                            .join("")
+                        : `<div style="color:#555;padding:4px 8px;font-size:12px;">No recent projects</div>`
+                }
+            </div>
 
-        <button class="pm-btn" id="pm-pick-folder">
-            <i class="pi pi-folder-open" style="color:#f0a500;"></i>
-            <span>Select Folder…</span>
-        </button>
+            <button class="pm-btn" id="pm-pick-folder" style="margin-bottom:0;">
+                <i class="pi pi-folder-open" style="color:#f0a500;"></i>
+                <span>Select Folder…</span>
+            </button>
 
-        <hr class="pm-divider" />
+            <hr class="pm-divider" />
+        ` : `
+            <!-- Project OFF / no project: just Select Folder button -->
+            <button class="pm-btn" id="pm-pick-folder" style="margin-bottom:12px;">
+                <i class="pi pi-folder-open" style="color:#f0a500;"></i>
+                <span>Select Folder…</span>
+            </button>
+        `}
 
-        <div class="pm-label">Current Asset Path</div>
+        <!-- Active Folder (both modes) -->
+        <div class="pm-label">Active Folder</div>
         <input
-            id="pm-asset"
+            id="pm-active-folder"
             class="pm-input"
             type="text"
             placeholder="e.g. characters/hero/concept"
-            value="${esc(state.current_asset ?? "")}"
+            value="${esc(activeFolder)}"
             style="margin-bottom:12px;"
         />
 
         <hr class="pm-divider" style="margin-top:0;" />
 
-        <button class="pm-btn pm-btn-danger" id="pm-exit" ${noProject ? "disabled" : ""}>
-            <i class="pi pi-times-circle"></i>
-            <span>Exit Project</span>
-        </button>
+        <!-- Save info + exit -->
+        <div class="pm-save-info" style="margin-bottom:${projectOn ? "12px" : "0"};">${esc(getSaveInfo())}</div>
+
+        ${projectOn ? `
+            <button class="pm-btn pm-btn-danger" id="pm-exit" style="margin-top:12px;">
+                <i class="pi pi-times-circle"></i>
+                <span>Exit Project</span>
+            </button>
+        ` : ""}
     `;
 
     // --- bind events ---
 
+    // Toggle circle
+    if (circleClickable) {
+        pm.dropdown.querySelector("#pm-toggle-circle").addEventListener("click", toggleEnabled);
+    }
+
+    // Recent project items (only rendered in project-ON layout)
     pm.dropdown.querySelectorAll(".pm-recent-item").forEach((el) => {
         el.addEventListener("click", () => selectRecent(el.dataset.path));
     });
 
     pm.dropdown.querySelector("#pm-pick-folder").addEventListener("click", pickAndSetup);
 
-    const assetInput = pm.dropdown.querySelector("#pm-asset");
-    // stop ComfyUI from swallowing keys while typing
-    assetInput.addEventListener("keydown", (e) => {
+    // Active Folder input
+    const folderInput = pm.dropdown.querySelector("#pm-active-folder");
+    folderInput.addEventListener("keydown", (e) => {
         e.stopPropagation();
-        if (e.key === "Enter") assetInput.blur();
+        if (e.key === "Enter") folderInput.blur();
     });
-    assetInput.addEventListener("blur", () => {
-        pushState({ current_asset: assetInput.value.trim() });
+    folderInput.addEventListener("blur", () => {
+        const val = folderInput.value.trim();
+        if (projectOn) {
+            pushState({ current_asset: val });
+        } else {
+            pushState({ current_local_asset: val });
+        }
     });
 
-    if (!noProject) {
-        pm.dropdown.querySelector("#pm-exit").addEventListener("click", exitProject);
-    }
+    // Exit Project (only in project-ON layout)
+    pm.dropdown.querySelector("#pm-exit")?.addEventListener("click", exitProject);
 }
 
 // ---------------------
@@ -350,32 +432,7 @@ function renderDropdown() {
 // ---------------------
 
 function syncUI() {
-    syncToggleIcon();
     if (pm.dropdownOpen) renderDropdown();
-}
-
-function syncToggleIcon() {
-    if (!pm.toggleBtn) return;
-    const icon = pm.toggleBtn.querySelector("i, .pi");
-    if (!icon) return;
-    const hasProject = !!pm.state.current_project;
-    if (!hasProject) {
-        icon.style.color = "#555";
-    } else {
-        icon.style.color = pm.state.enabled ? "#4caf50" : "#e05555";
-    }
-}
-
-function getSetProjectTooltip() {
-    return pm.state.current_project
-        ? projectName(pm.state.current_project)
-        : "No project set";
-}
-
-function getToggleTooltip() {
-    if (!pm.state.current_project) return "No active project";
-    if (pm.state.enabled) return `Saving to: ${pm.state.current_project}`;
-    return `Saving to: ${pm.outputDir || "ComfyUI default output"} (project paused)`;
 }
 
 // ---------------------
@@ -383,46 +440,21 @@ function getToggleTooltip() {
 // ---------------------
 
 function findAndDecorateButtons() {
-    // Find Set Project button by its label text
     if (!pm.setProjectBtn) {
         const btn = Array.from(document.querySelectorAll("button")).find(
-            (b) => b.textContent?.trim() === "Set Project"
+            (b) => b.textContent?.trim() === "Project Manager"
         );
         if (btn) {
             pm.setProjectBtn = btn;
             btn.addEventListener("mouseenter", () => {
-                btn.title = getSetProjectTooltip();
+                btn.title = pm.state.current_project
+                    ? projectName(pm.state.current_project)
+                    : "No project set";
             });
         }
     }
 
-    // Find toggle button: first button-like sibling after Set Project
-    if (pm.setProjectBtn && !pm.toggleBtn) {
-        const parent = pm.setProjectBtn.parentElement;
-        if (parent) {
-            const siblings = Array.from(parent.children);
-            const idx = siblings.indexOf(pm.setProjectBtn);
-            for (let i = idx + 1; i < siblings.length; i++) {
-                const el = siblings[i];
-                const candidate =
-                    el.tagName === "BUTTON"
-                        ? el
-                        : el.querySelector("button");
-                if (candidate && candidate !== pm.setProjectBtn) {
-                    pm.toggleBtn = candidate;
-                    candidate.addEventListener("mouseenter", () => {
-                        candidate.title = getToggleTooltip();
-                    });
-                    break;
-                }
-            }
-        }
-    }
-
-    syncToggleIcon();
-
-    // Retry until both buttons are found
-    if (!pm.setProjectBtn || !pm.toggleBtn) {
+    if (!pm.setProjectBtn) {
         setTimeout(findAndDecorateButtons, 600);
     }
 }
@@ -436,14 +468,13 @@ app.registerExtension({
 
     async setup() {
         await Promise.all([fetchState(), fetchOutputDir()]);
-        // Defer button discovery until Vue renders the action bar
         setTimeout(findAndDecorateButtons, 400);
     },
 
     actionBarButtons: [
         {
             icon: "pi pi-folder-open",
-            label: "Set Project",
+            label: "Project Manager",
             onClick(event) {
                 const anchor =
                     event?.currentTarget ??
@@ -455,12 +486,6 @@ app.registerExtension({
                 } else {
                     openDropdown(anchor);
                 }
-            },
-        },
-        {
-            icon: "pi pi-circle-fill",
-            onClick() {
-                toggleEnabled();
             },
         },
     ],

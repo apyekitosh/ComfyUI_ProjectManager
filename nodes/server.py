@@ -11,13 +11,24 @@ STATE_FILE = Path(__file__).parent.parent / "project_state.json"
 
 DEFAULT_STATE: dict = {
     "current_project": None,
-    "current_asset": "",
+    "current_asset": "",          # active folder used when project is ON
+    "current_local_asset": "",    # active folder used when project is OFF / no project
     "recent_projects": [],
     "enabled": False,
 }
 
+# Folder type key used to register the project path with ComfyUI's /view endpoint.
+# ComfyUI's /view route reads folder_names_and_paths[type] to resolve the file,
+# so any string key works as long as it's registered before the request arrives.
+PM_FOLDER_TYPE = "pm_output"
+PM_EXTENSIONS: set[str] = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mkv", ".webm"}
+
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pm_tkinter")
 
+
+# ---------------------------------------------------------------------------
+# State helpers
+# ---------------------------------------------------------------------------
 
 def load_state() -> dict:
     if STATE_FILE.exists():
@@ -40,6 +51,54 @@ def get_current_state() -> dict:
     return load_state()
 
 
+# ---------------------------------------------------------------------------
+# folder_paths registration
+# ---------------------------------------------------------------------------
+
+def sync_folder_paths(project: str | None) -> None:
+    """
+    Keep folder_paths in sync so ComfyUI's /view endpoint can serve project
+    files directly without writing a temp copy.
+    """
+    if project:
+        ai_pipeline = str(Path(project) / "AIPipeline")
+        folder_paths.folder_names_and_paths[PM_FOLDER_TYPE] = (
+            [ai_pipeline],
+            PM_EXTENSIONS,
+        )
+    else:
+        folder_paths.folder_names_and_paths.pop(PM_FOLDER_TYPE, None)
+
+
+def _patch_get_directory_by_type() -> None:
+    """
+    ComfyUI's /view endpoint calls folder_paths.get_directory_by_type(type) to
+    resolve the base directory for a SavedResult. That function only knows about
+    "output", "temp", and "input" — it returns None for any other string, causing
+    /view to return a 400. Patch it once to also handle our custom PM_FOLDER_TYPE.
+    """
+    original = folder_paths.get_directory_by_type
+
+    def patched(type_name: str) -> str | None:
+        if type_name == PM_FOLDER_TYPE:
+            entry = folder_paths.folder_names_and_paths.get(PM_FOLDER_TYPE)
+            if entry and entry[0]:
+                return entry[0][0]  # first registered path for this type
+            return None
+        return original(type_name)
+
+    folder_paths.get_directory_by_type = patched
+
+
+# Register on import so files from a previously-saved project are served after restart.
+sync_folder_paths(load_state().get("current_project"))
+_patch_get_directory_by_type()
+
+
+# ---------------------------------------------------------------------------
+# API routes
+# ---------------------------------------------------------------------------
+
 @PromptServer.instance.routes.get("/projectmanager/state")
 async def api_get_state(request: web.Request) -> web.Response:
     return web.json_response(load_state())
@@ -49,12 +108,12 @@ async def api_get_state(request: web.Request) -> web.Response:
 async def api_update_state(request: web.Request) -> web.Response:
     data = await request.json()
     state = load_state()
-    # Only allow known keys
     for k in DEFAULT_STATE:
         if k in data:
             state[k] = data[k]
     state["recent_projects"] = state["recent_projects"][:5]
     save_state(state)
+    sync_folder_paths(state.get("current_project"))
     return web.json_response(state)
 
 
@@ -104,6 +163,7 @@ async def api_setup_project(request: web.Request) -> web.Response:
     state["enabled"] = True
 
     save_state(state)
+    sync_folder_paths(folder_path)
     return web.json_response(state)
 
 
