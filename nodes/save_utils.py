@@ -6,7 +6,7 @@ from comfy_api.latest import io, ui
 
 from .server import PM_FOLDER_TYPE, get_current_state
 
-SAVE_TO_OPTIONS = ["asset", "project", "temp"]
+SAVE_TO_OPTIONS = ["active", "project", "temp"]
 
 
 class _FolderTypeProxy:
@@ -43,13 +43,13 @@ def resolve_base_dir(save_to: str) -> str:
 
     if not project or not enabled:
         output_dir = folder_paths.get_output_directory()
-        if save_to == "asset":
+        if save_to == "active":
             local = state.get("current_local_asset", "").strip().strip("/\\")
             return os.path.join(output_dir, local) if local else output_dir
         return output_dir  # "project" mode with no active project → output root
 
     base = os.path.join(project, "AIPipeline")
-    if save_to == "asset":
+    if save_to == "active":
         asset = state.get("current_asset", "").strip().strip("/\\")
         return os.path.join(base, asset) if asset else base
     return base  # "project" mode → AIPipeline root

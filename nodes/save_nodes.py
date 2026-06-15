@@ -36,19 +36,19 @@ class SaveImageToProject(io.ComfyNode):
                 io.Combo.Input(
                     "save_to",
                     options=SAVE_TO_OPTIONS,
-                    default="asset",
+                    default="active",
                     tooltip=(
-                        "asset → project/AIPipeline/<asset path>  |  "
-                        "project → project/AIPipeline  |  "
+                        "active → active folder (project/AIPipeline/<active folder> or output/<active folder>)  |  "
+                        "project → project/AIPipeline root (or ComfyUI output)  |  "
                         "temp → ComfyUI temp dir (ephemeral preview)"
                     ),
                 ),
                 io.Boolean.Input(
-                    "hide_preview",
-                    default=False,
-                    label_on="Hidden",
-                    label_off="Visible",
-                    tooltip="Skip node preview. Useful when saving hundreds of images.",
+                    "show_preview",
+                    default=True,
+                    label_on="Visible",
+                    label_off="Hidden",
+                    tooltip="Show a preview of the saved image on the node.",
                 ),
             ],
             outputs=[
@@ -63,7 +63,7 @@ class SaveImageToProject(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, images, filename, save_to, hide_preview):
+    def execute(cls, images, filename, save_to, show_preview):
         base_dir = resolve_base_dir(save_to)
         paths = build_save_paths(filename, base_dir, "png", images.shape[0])
 
@@ -80,12 +80,13 @@ class SaveImageToProject(io.ComfyNode):
                     meta.add_text(k, json.dumps(v))
 
             pil_img.save(path, pnginfo=meta, compress_level=4)
-            saved_results.append(make_saved_result(path, save_to))
+            if show_preview:
+                saved_results.append(make_saved_result(path, save_to))
 
-        if hide_preview:
-            return io.NodeOutput(paths)
+        if show_preview:
+            return io.NodeOutput(paths, ui=ui.SavedImages(saved_results))
 
-        return io.NodeOutput(paths, ui=ui.SavedImages(saved_results))
+        return io.NodeOutput(paths)
 
 
 class SaveVideoToProject(io.ComfyNode):
@@ -113,19 +114,19 @@ class SaveVideoToProject(io.ComfyNode):
                 io.Combo.Input(
                     "save_to",
                     options=SAVE_TO_OPTIONS,
-                    default="asset",
+                    default="active",
                     tooltip=(
-                        "asset → project/AIPipeline/<asset path>  |  "
-                        "project → project/AIPipeline  |  "
+                        "active → active folder (project/AIPipeline/<active folder> or output/<active folder>)  |  "
+                        "project → project/AIPipeline root (or ComfyUI output)  |  "
                         "temp → ComfyUI temp dir (ephemeral preview)"
                     ),
                 ),
                 io.Boolean.Input(
-                    "hide_preview",
-                    default=False,
-                    label_on="Hidden",
-                    label_off="Visible",
-                    tooltip="Skip node preview (shows first frame thumbnail when visible).",
+                    "show_preview",
+                    default=True,
+                    label_on="Visible",
+                    label_off="Hidden",
+                    tooltip="Show a preview of the saved video on the node.",
                 ),
             ],
             outputs=[
@@ -139,7 +140,7 @@ class SaveVideoToProject(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, video, filename, save_to, hide_preview):
+    def execute(cls, video, filename, save_to, show_preview):
         base_dir = resolve_base_dir(save_to)
         [save_path] = build_save_paths(filename, base_dir, "mp4", 1)
 
@@ -159,7 +160,7 @@ class SaveVideoToProject(io.ComfyNode):
             metadata=meta,
         )
 
-        if hide_preview:
+        if not show_preview:
             return io.NodeOutput(save_path)
 
         saved_result = make_saved_result(save_path, save_to)
