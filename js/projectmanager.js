@@ -139,15 +139,19 @@ function isProjectActive() {
     return !!(pm.state.current_project && pm.state.enabled);
 }
 
-function getSaveInfo() {
+function getSavePath() {
     if (isProjectActive()) {
         const asset = (pm.state.current_asset ?? "").trim().replace(/\\/g, "/").replace(/^\/|\/$/g, "");
         const base = (pm.state.current_project ?? "").replace(/\\/g, "/") + "/AIPipeline";
-        return "Saving to: " + (asset ? base + "/" + asset : base);
+        return asset ? base + "/" + asset : base;
     }
     const local = (pm.state.current_local_asset ?? "").trim().replace(/\\/g, "/").replace(/^\/|\/$/g, "");
-    const base = (pm.outputDir || "ComfyUI output").replace(/\\/g, "/");
-    return "Saving to: " + (local ? base + "/" + local : base);
+    const base = (pm.outputDir || "").replace(/\\/g, "/");
+    return local && base ? base + "/" + local : (base || local || "ComfyUI output");
+}
+
+function getSaveInfo() {
+    return "Saving to: " + getSavePath();
 }
 
 // ---------------------
@@ -384,7 +388,11 @@ function renderDropdown() {
         <hr class="pm-divider" style="margin-top:0;" />
 
         <!-- Save info + exit -->
-        <div class="pm-save-info" style="margin-bottom:${projectOn ? "12px" : "0"};">${esc(getSaveInfo())}</div>
+        <button id="pm-open-folder" class="pm-save-info"
+                style="background:none;border:none;padding:0;margin:0;text-align:left;
+                       cursor:pointer;margin-bottom:${projectOn ? "12px" : "0"};">
+            ${esc(getSaveInfo())}
+        </button>
 
         ${projectOn ? `
             <button class="pm-btn pm-btn-danger" id="pm-exit" style="margin-top:12px;">
@@ -421,6 +429,16 @@ function renderDropdown() {
         } else {
             pushState({ current_local_asset: val });
         }
+    });
+
+    // Open save folder in Explorer
+    pm.dropdown.querySelector("#pm-open-folder").addEventListener("click", () => {
+        const path = getSavePath();
+        api.fetchApi(`${API}/open_folder`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path }),
+        }).catch((e) => toast("error", "Project Manager", String(e)));
     });
 
     // Exit Project (only in project-ON layout)

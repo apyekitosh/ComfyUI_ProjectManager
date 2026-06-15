@@ -170,3 +170,18 @@ async def api_setup_project(request: web.Request) -> web.Response:
 @PromptServer.instance.routes.get("/projectmanager/output_dir")
 async def api_output_dir(request: web.Request) -> web.Response:
     return web.json_response({"path": folder_paths.get_output_directory()})
+
+
+@PromptServer.instance.routes.post("/projectmanager/open_folder")
+async def api_open_folder(request: web.Request) -> web.Response:
+    data = await request.json()
+    path: str | None = data.get("path")
+    if not path:
+        return web.json_response({"error": "No path provided"}, status=400)
+    try:
+        import os
+        os.makedirs(path, exist_ok=True)
+        os.startfile(path)
+        return web.json_response({"ok": True})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
