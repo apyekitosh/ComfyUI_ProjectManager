@@ -1,23 +1,13 @@
 import os
 import re
+import shutil
 
 import folder_paths
 from comfy_api.latest import io, ui
 
-from .server import PM_FOLDER_TYPE, get_current_state
+from .server import get_current_state
 
 SAVE_TO_OPTIONS = ["active", "project", "temp"]
-
-
-class _FolderTypeProxy:
-    """
-    Wraps a custom folder-type string so ui.SavedResult accepts it.
-    SavedResult calls type.value internally, expecting an enum — this duck-types that.
-    """
-    def __init__(self, name: str):
-        self.value = name
-
-_PM_FOLDER_TYPE_PROXY = _FolderTypeProxy(PM_FOLDER_TYPE)
 
 
 def resolve_base_dir(save_to: str) -> str:
@@ -95,27 +85,35 @@ def build_save_paths(filename: str, base_dir: str, ext: str, count: int = 1) -> 
 
 
 def make_saved_result(save_path: str, save_to: str) -> ui.SavedResult:
-    """
-    Build a SavedResult pointing at the actual saved file so ComfyUI's /view
-    endpoint can serve it directly — no temp copy needed.
-
-    For project saves the custom 'pm_output' type is used (registered in
-    folder_paths by server.py). For fallback / temp uses standard FolderType.
-    """
     state = get_current_state()
     project: str | None = state.get("current_project")
     enabled: bool = state.get("enabled", False)
 
     if save_to == "temp":
         base = folder_paths.get_temp_directory()
-        folder_type = io.FolderType.temp
-    elif project and enabled:
-        base = os.path.join(project, "AIPipeline")
-        folder_type = _PM_FOLDER_TYPE_PROXY  # proxy so SavedResult's type.value call works
-    else:
-        base = folder_paths.get_output_directory()
-        folder_type = io.FolderType.output
+        rel = os.path.relpath(os.path.dirname(save_path), base)
+        subfolder = "" if rel == "." else rel.replace("\\", "/")
+        return ui.SavedResult(os.path.basename(save_path), subfolder, io.FolderType.temp)
 
+    if project and enabled:
+        # The real file lives in the project dir. Write a temp copy so ComfyUI's
+        # history sidebar and /view?type=temp can find it. Temp auto-cleans on
+        # restart; the original stays in the project folder.
+        base = os.path.join(project, "AIPipeline")
+        rel = os.path.relpath(os.path.dirname(save_path), base)
+        inner = "" if rel == "." else rel.replace("\\", "/")
+
+        temp_subdir = os.path.join(folder_paths.get_temp_directory(), "pm_preview")
+        if inner:
+            temp_subdir = os.path.join(temp_subdir, inner)
+        os.makedirs(temp_subdir, exist_ok=True)
+        shutil.copy2(save_path, os.path.join(temp_subdir, os.path.basename(save_path)))
+
+        subfolder = "pm_preview/" + inner if inner else "pm_preview"
+        return ui.SavedResult(os.path.basename(save_path), subfolder, io.FolderType.temp)
+
+    # No active project — file is in ComfyUI output dir
+    base = folder_paths.get_output_directory()
     rel = os.path.relpath(os.path.dirname(save_path), base)
     subfolder = "" if rel == "." else rel.replace("\\", "/")
-    return ui.SavedResult(os.path.basename(save_path), subfolder, folder_type)
+    return ui.SavedResult(os.path.basename(save_path), subfolder, io.FolderType.output)
