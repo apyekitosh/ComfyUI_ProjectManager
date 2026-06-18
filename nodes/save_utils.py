@@ -99,18 +99,10 @@ def make_saved_result(save_path: str, save_to: str) -> ui.SavedResult:
         # The real file lives in the project dir. Write a temp copy so ComfyUI's
         # history sidebar and /view?type=temp can find it. Temp auto-cleans on
         # restart; the original stays in the project folder.
-        base = os.path.join(project, "AIPipeline")
-        rel = os.path.relpath(os.path.dirname(save_path), base)
-        inner = "" if rel == "." else rel.replace("\\", "/")
-
-        temp_subdir = os.path.join(folder_paths.get_temp_directory(), "pm_preview")
-        if inner:
-            temp_subdir = os.path.join(temp_subdir, inner)
-        os.makedirs(temp_subdir, exist_ok=True)
-        shutil.copy2(save_path, os.path.join(temp_subdir, os.path.basename(save_path)))
-
-        subfolder = "pm_preview/" + inner if inner else "pm_preview"
-        return ui.SavedResult(os.path.basename(save_path), subfolder, io.FolderType.temp)
+        temp_dir = folder_paths.get_temp_directory()
+        temp_path = os.path.join(temp_dir, os.path.basename(save_path))
+        shutil.copy2(save_path, temp_path)
+        return ui.SavedResult(os.path.basename(save_path), "", io.FolderType.temp)
 
     # No active project — file is in ComfyUI output dir
     base = folder_paths.get_output_directory()
